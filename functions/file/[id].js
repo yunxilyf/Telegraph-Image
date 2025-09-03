@@ -36,16 +36,92 @@ export async function onRequest(context) {
     // Log response details
     console.log(response.ok, response.status);
 
+    // Helper function to get MIME type based on file extension
+    const getMimeType = (filename) => {
+        const ext = filename.split('.').pop().toLowerCase();
+        const mimeTypes = {
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'png': 'image/png',
+            'gif': 'image/gif',
+            'webp': 'image/webp',
+            'bmp': 'image/bmp',
+            'tiff': 'image/tiff',
+            'ico': 'image/x-icon',
+            'mp4': 'video/mp4',
+            'webm': 'video/webm',
+            'ogg': 'video/ogg',
+            'avi': 'video/x-msvideo',
+            'mov': 'video/quicktime',
+            'wmv': 'video/x-ms-wmv',
+            'flv': 'video/x-flv',
+            'mkv': 'video/x-matroska',
+            'mp3': 'audio/mpeg',
+            'wav': 'audio/wav',
+            'flac': 'audio/flac',
+            'aac': 'audio/aac',
+            'm4a': 'audio/mp4',
+            'wma': 'audio/x-ms-wma',
+            'pdf': 'application/pdf',
+            'doc': 'application/msword',
+            'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'xls': 'application/vnd.ms-excel',
+            'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'ppt': 'application/vnd.ms-powerpoint',
+            'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            'txt': 'text/plain',
+            'rtf': 'application/rtf',
+            'zip': 'application/zip',
+            'rar': 'application/x-rar-compressed'
+        };
+        return mimeTypes[ext] || 'application/octet-stream';
+    };
+
+    // Helper function to create response with proper headers
+    const createProperResponse = async (originalResponse) => {
+        const filename = url.pathname.split('/').pop();
+        const mimeType = getMimeType(filename);
+        const responseBody = await originalResponse.arrayBuffer();
+        
+        const headers = new Headers();
+        headers.set('Content-Type', mimeType);
+        
+        // For images and videos, set inline disposition for preview
+        if (mimeType.startsWith('image/') || mimeType.startsWith('video/') || mimeType.startsWith('audio/')) {
+            headers.set('Content-Disposition', 'inline');
+        } else {
+            // For documents, keep attachment disposition but with proper filename
+            headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+        }
+        
+        // Copy other important headers
+        if (originalResponse.headers.get('Content-Length')) {
+            headers.set('Content-Length', originalResponse.headers.get('Content-Length'));
+        }
+        if (originalResponse.headers.get('Cache-Control')) {
+            headers.set('Cache-Control', originalResponse.headers.get('Cache-Control'));
+        }
+        if (originalResponse.headers.get('ETag')) {
+            headers.set('ETag', originalResponse.headers.get('ETag'));
+        }
+        
+        return new Response(responseBody, {
+            status: originalResponse.status,
+            statusText: originalResponse.statusText,
+            headers: headers
+        });
+    };
+
     // Allow the admin page to directly view the image
     const isAdmin = request.headers.get('Referer')?.includes(`${url.origin}/admin`);
     if (isAdmin) {
-        return response;
+        return await createProperResponse(response);
     }
 
     // Check if KV storage is available
     if (!env.img_url) {
         console.log("KV storage not available, returning image directly");
-        return response;  // Directly return image response, terminate execution
+        return await createProperResponse(response);  // Return with proper headers
     }
 
     // The following code executes only if KV is available
@@ -77,7 +153,7 @@ export async function onRequest(context) {
 
     // Handle based on ListType and Label
     if (metadata.ListType === "White") {
-        return response;
+        return await createProperResponse(response);
     } else if (metadata.ListType === "Block" || metadata.Label === "adult") {
         const referer = request.headers.get('Referer');
         const redirectUrl = referer ? "https://static-res.pages.dev/teleimage/img-block-compressed.png" : `${url.origin}/block-img.html`;
@@ -124,7 +200,7 @@ export async function onRequest(context) {
     await env.img_url.put(params.id, "", { metadata });
 
     // Return file content
-    return response;
+    return await createProperResponse(response);
 }
 
 async function getFilePath(env, file_id) {
